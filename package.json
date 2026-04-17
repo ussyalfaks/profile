@@ -1,0 +1,25 @@
+{
+  "name": "profile-intelligence-service",
+  "version": "1.0.0",
+  "description": "Profile Intelligence Service - aggregates name data from Genderize, Agify, and Nationalize APIs",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "prisma generate",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.1",
+    "uuidv7": "^1.0.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  }
+}
