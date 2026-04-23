@@ -1,5 +1,8 @@
 {
   "name": "profile-intelligence-service",
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
   "version": "1.0.0",
   "description": "Profile Intelligence Service - aggregates name data from Genderize, Agify, and Nationalize APIs",
   "main": "api/index.js",

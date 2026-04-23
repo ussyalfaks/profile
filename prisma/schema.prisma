@@ -14,15 +14,18 @@ model Profile {
   name                String   @unique
   gender              String
   gender_probability  Float
-  sample_size         Int
   age                 Int
   age_group           String
-  country_id          String
+  country_id          String   @db.VarChar(2)
+  country_name        String
   country_probability Float
   created_at          DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([gender])
   @@index([country_id])
   @@index([age_group])
+  @@index([age])
+  @@index([gender_probability])
+  @@index([country_probability])
   @@map("profiles")
 }

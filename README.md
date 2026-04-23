@@ -1,6 +1,6 @@
 # Profile Intelligence Service
 
-A REST API that enriches a given name with gender, age, and nationality data by aggregating responses from three public APIs (Genderize, Agify, Nationalize) and persisting the structured result.
+A queryable demographic intelligence API. Enriches names with gender, age, and nationality data from public APIs, persists the results, and exposes a full query engine with filtering, sorting, pagination, and natural language search over 2026 seeded profiles.
 
 ## Tech Stack
 
@@ -11,179 +11,330 @@ A REST API that enriches a given name with gender, age, and nationality data by 
 
 ## Live API
 
-Base URL: `https://YOUR-APP.vercel.app` _(update after deploy)_
+Base URL: `https://profile-azng.vercel.app`
+
+## Database Schema
+
+| Field | Type | Notes |
+|---|---|---|
+| id | UUID v7 | Primary key |
+| name | VARCHAR UNIQUE | Person's full name |
+| gender | VARCHAR | `male` or `female` |
+| gender_probability | FLOAT | Confidence score (0–1) |
+| age | INT | Exact age |
+| age_group | VARCHAR | `child`, `teenager`, `adult`, `senior` |
+| country_id | VARCHAR(2) | ISO 3166-1 alpha-2 code (e.g. `NG`, `KE`) |
+| country_name | VARCHAR | Full country name |
+| country_probability | FLOAT | Confidence score (0–1) |
+| created_at | TIMESTAMP | Auto-generated UTC |
+
+---
 
 ## Endpoints
 
 | Method | Path | Description |
-|--------|------|-------------|
+|---|---|---|
 | POST | `/api/profiles` | Create a profile (idempotent on `name`) |
-| GET | `/api/profiles` | List profiles; filter by `gender`, `country_id`, `age_group` |
+| GET | `/api/profiles` | List/filter profiles with sorting and pagination |
+| GET | `/api/profiles/search` | Natural language profile search |
 | GET | `/api/profiles/:id` | Get a single profile by UUID |
 | DELETE | `/api/profiles/:id` | Delete a profile |
 
-### POST /api/profiles
+---
+
+## GET /api/profiles
+
+List profiles with optional filtering, sorting, and pagination. All filters are combinable (AND logic).
+
+### Filter Parameters
+
+| Param | Type | Description | Example |
+|---|---|---|---|
+| `gender` | string | `male` or `female` | `?gender=male` |
+| `age_group` | string | `child`, `teenager`, `adult`, `senior` | `?age_group=adult` |
+| `country_id` | string | ISO alpha-2 code | `?country_id=NG` |
+| `min_age` | integer | Minimum age (inclusive) | `?min_age=25` |
+| `max_age` | integer | Maximum age (inclusive) | `?max_age=40` |
+| `min_gender_probability` | float | Minimum gender confidence | `?min_gender_probability=0.9` |
+| `min_country_probability` | float | Minimum country confidence | `?min_country_probability=0.5` |
+
+### Sort Parameters
+
+| Param | Values | Default |
+|---|---|---|
+| `sort_by` | `age`, `created_at`, `gender_probability` | `created_at` |
+| `order` | `asc`, `desc` | `desc` |
+
+### Pagination Parameters
+
+| Param | Default | Max |
+|---|---|---|
+| `page` | `1` | — |
+| `limit` | `10` | `50` |
+
+### Response
+
+```json
+{
+  "status": "success",
+  "page": 1,
+  "limit": 10,
+  "total": 2026,
+  "data": [
+    {
+      "id": "019605a3-1234-7abc-8def-000000000001",
+      "name": "amara",
+      "gender": "female",
+      "gender_probability": 0.95,
+      "age": 28,
+      "age_group": "adult",
+      "country_id": "NG",
+      "country_name": "Nigeria",
+      "country_probability": 0.62,
+      "created_at": "2026-04-22T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Examples
+
+```bash
+# Males from Nigeria aged 25+
+GET /api/profiles?gender=male&country_id=NG&min_age=25
+
+# Adults sorted by age descending, page 2
+GET /api/profiles?age_group=adult&sort_by=age&order=desc&page=2&limit=20
+
+# High-confidence gender results
+GET /api/profiles?min_gender_probability=0.95
+```
+
+---
+
+## GET /api/profiles/search
+
+Natural language query interface. Converts plain English into filters using rule-based parsing (no AI/LLMs).
+
+### Parameters
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `q` | string | Yes | Natural language query |
+| `page` | integer | No | Page number (default: 1) |
+| `limit` | integer | No | Results per page (default: 10, max: 50) |
+
+### Parsing Rules
+
+| Query pattern | Extracted filter |
+|---|---|
+| `male` / `males` | `gender = male` |
+| `female` / `females` | `gender = female` |
+| `young` | `min_age = 16, max_age = 24` |
+| `child` / `children` | `age_group = child` |
+| `teenager` / `teenagers` | `age_group = teenager` |
+| `adult` / `adults` | `age_group = adult` |
+| `senior` / `seniors` | `age_group = senior` |
+| `above N` / `over N` | `min_age = N` |
+| `below N` / `under N` | `max_age = N` |
+| `aged N` / `age N` | exact age (`min_age = max_age = N`) |
+| `from <country>` / `in <country>` | `country_id` via country name lookup |
+
+### Example Queries
+
+| Query | Filters applied |
+|---|---|
+| `young males from nigeria` | `gender=male, min_age=16, max_age=24, country_id=NG` |
+| `females above 30` | `gender=female, min_age=30` |
+| `adult males from kenya` | `gender=male, age_group=adult, country_id=KE` |
+| `male and female teenagers above 17` | `age_group=teenager, min_age=17` |
+| `people from angola` | `country_id=AO` |
+| `senior females` | `gender=female, age_group=senior` |
+
+### Response
+
+Same shape as `GET /api/profiles` (`status`, `page`, `limit`, `total`, `data`).
+
+### Error — Unrecognized query
+
+```json
+{ "status": "error", "message": "Unable to interpret query" }
+```
+
+### Error — Missing `q`
+
+```json
+{ "status": "error", "message": "Invalid query parameters" }
+```
+
+---
+
+## POST /api/profiles
+
+Create a profile by enriching a name from Genderize, Agify, and Nationalize. Idempotent — submitting the same name twice returns the existing record.
 
 **Request:**
 ```json
-{ "name": "ella" }
+{ "name": "amara" }
 ```
 
-**Response (201):**
+**Response (201 created / 200 already exists):**
 ```json
 {
   "status": "success",
   "data": {
-    "id": "b3f9c1e2-7d4a-4c91-9c2a-1f0a8e5b6d12",
-    "name": "ella",
+    "id": "019605a3-1234-7abc-8def-000000000001",
+    "name": "amara",
     "gender": "female",
-    "gender_probability": 0.99,
-    "sample_size": 1234,
-    "age": 46,
+    "gender_probability": 0.95,
+    "age": 28,
     "age_group": "adult",
-    "country_id": "DRC",
-    "country_probability": 0.85,
-    "created_at": "2026-04-01T12:00:00Z"
+    "country_id": "NG",
+    "country_name": "Nigeria",
+    "country_probability": 0.62,
+    "created_at": "2026-04-22T10:00:00.000Z"
   }
 }
 ```
 
-If the name already exists, returns `200` with `"message": "Profile already exists"` and the existing record.
+**Age group classification:**
+- `0–12` → `child`
+- `13–19` → `teenager`
+- `20–59` → `adult`
+- `60+` → `senior`
 
-### Processing Rules
+---
 
-- **Gender**: from Genderize; `count` is renamed to `sample_size`.
-- **Age**: from Agify, classified as:
-  - `0–12` → `child`
-  - `13–19` → `teenager`
-  - `20–59` → `adult`
-  - `60+` → `senior`
-- **Country**: country with the highest `probability` from Nationalize.
+## GET /api/profiles/:id
 
-### Error Responses
+Returns a single profile by its UUID v7.
+
+```bash
+GET /api/profiles/019605a3-1234-7abc-8def-000000000001
+```
+
+---
+
+## DELETE /api/profiles/:id
+
+Deletes a profile. Returns `204 No Content` on success.
+
+---
+
+## Error Responses
+
+All errors follow this structure:
+
+```json
+{ "status": "error", "message": "<description>" }
+```
 
 | Status | Condition |
-|--------|-----------|
-| 400 | Missing or empty `name` |
-| 422 | `name` is wrong type |
+|---|---|
+| 400 | Missing or empty required parameter |
+| 422 | Invalid parameter type or value |
 | 404 | Profile not found |
-| 502 | Upstream API returned invalid data |
+| 502 | Upstream API (Genderize/Agify/Nationalize) returned invalid data |
 | 500 | Internal server error |
 
-Upstream errors follow the spec shape:
-```json
-{ "status": "502", "message": "Genderize returned an invalid response" }
+---
+
+## Data Seeding
+
+The database is pre-seeded with 2026 profiles. To re-seed (idempotent — safe to re-run):
+
+```bash
+node prisma/seed.js
 ```
 
-All other errors:
-```json
-{ "status": "error", "message": "..." }
+Seed data is read from `seed_profiles.json` at the project root. Re-running skips duplicates via `createMany({ skipDuplicates: true })`.
+
+---
+
+## Project Structure
+
 ```
+api/
+  index.js              Vercel serverless entry (re-exports Express app)
+lib/
+  app.js                Express app — mounts all routes, error handlers
+  prisma.js             Singleton Prisma client
+  enrichment.js         Fetches from Genderize, Agify, Nationalize
+  formatter.js          Shapes Prisma records into API response format
+  query-parser.js       Rule-based NLP parser for /search endpoint
+  routes/
+    profiles.js         GET /api/profiles — filters, sort, pagination
+    search.js           GET /api/profiles/search — NLP query
+prisma/
+  schema.prisma         Profile model definition
+  seed.js               Seeds 2026 profiles idempotently
+seed_profiles.json      Source data (2026 profiles)
+vercel.json             Routes all traffic to api/index.js
+```
+
+---
 
 ## Deployment
 
 ### Step 1 — Create a Supabase project
 
 1. Go to [supabase.com](https://supabase.com) → **New Project**.
-2. Pick a **strong database password** (you'll need it in a minute).
-3. Pick a region close to you (e.g. `West EU (Ireland)` for Nigeria).
-4. Wait ~2 minutes for the database to provision.
+2. Pick a strong database password.
+3. Wait ~2 minutes for provisioning.
 
 ### Step 2 — Get your connection strings
 
-1. In the Supabase dashboard, click **Connect** at the top of the page.
-2. You'll see three tabs: **Direct connection**, **Transaction pooler**, **Session pooler**. You need two of them.
+In the Supabase dashboard, click **Connect**.
 
-**`DATABASE_URL`** — from the **Transaction pooler** tab (port **6543**). Append `?pgbouncer=true&connection_limit=1`:
+**`DATABASE_URL`** — from the **Transaction pooler** tab (port 6543):
 ```
 postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
 ```
 
-**`DIRECT_URL`** — from the **Session pooler** tab (port **5432**), no extra flags:
+**`DIRECT_URL`** — from the **Session pooler** tab (port 5432):
 ```
 postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres
 ```
 
-Replace `[YOUR-PASSWORD]` in the string with the password from Step 1.
-
-> **Why two URLs?** Prisma Migrate can't run through the transaction pooler (PgBouncer doesn't support the prepared statements migrations need). The app uses the transaction pooler at runtime because Vercel serverless functions create many short-lived connections, which the pooler is built to handle.
-
-### Step 3 — Push to GitHub
+### Step 3 — Apply schema and seed
 
 ```bash
-git init
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/YOUR_USERNAME/REPO.git
-git branch -M main
-git push -u origin main
-```
-
-### Step 4 — Apply the migration to Supabase
-
-Run this **once** locally before deploying:
-
-```bash
-# Create .env with BOTH URLs
+# Set up .env
 cat > .env <<EOF
-DATABASE_URL="your-transaction-pooler-url-with-pgbouncer-flag"
+DATABASE_URL="your-transaction-pooler-url"
 DIRECT_URL="your-session-pooler-url"
 EOF
 
 npm install
-npx prisma migrate deploy
+npx prisma db push
+node prisma/seed.js
 ```
 
-You should see `All migrations have been successfully applied`. The `profiles` table now exists in Supabase.
+### Step 4 — Deploy on Vercel
 
-### Step 5 — Deploy on Vercel
+1. Push to GitHub.
+2. Import repo on [vercel.com](https://vercel.com).
+3. Add `DATABASE_URL` and `DIRECT_URL` as environment variables.
+4. Deploy.
 
-1. Go to [vercel.com](https://vercel.com) → **Add New → Project** → import your repo.
-2. Under **Environment Variables**, add both:
-   - `DATABASE_URL` (transaction pooler, port 6543, with `pgbouncer=true&connection_limit=1`)
-   - `DIRECT_URL` (session pooler, port 5432)
-3. Click **Deploy**.
-
-### Step 6 — Test
-
-```bash
-curl -X POST https://YOUR-APP.vercel.app/api/profiles \
-  -H "Content-Type: application/json" \
-  -d '{"name":"emmanuel"}'
-
-curl https://YOUR-APP.vercel.app/api/profiles
-curl "https://YOUR-APP.vercel.app/api/profiles?gender=male&country_id=NG"
-```
+---
 
 ## Local Development
 
 ```bash
 npm install
-cp .env.example .env            # fill in your Supabase URLs
-npx prisma migrate deploy       # first time only
-npx vercel dev                  # emulates Vercel locally
+cp .env.example .env      # fill in your Supabase URLs
+npx prisma db push        # sync schema
+node prisma/seed.js       # seed 2026 profiles
+npx vercel dev            # start local server
 ```
 
-## Project Structure
-
-```
-api/
-  index.js              Vercel serverless entry (wraps Express)
-lib/
-  app.js                Express app with all routes
-  prisma.js             Singleton Prisma client
-  enrichment.js         External API orchestration
-  formatter.js          Response shaping
-prisma/
-  schema.prisma         Profile model with dual-URL datasource
-  migrations/           SQL migrations
-vercel.json             Routes all traffic to api/index.js
-```
+---
 
 ## Troubleshooting
 
-**`prepared statement "s0" already exists`** — you forgot `?pgbouncer=true` on `DATABASE_URL`. Add it and redeploy.
+**`prepared statement "s0" already exists`** — add `?pgbouncer=true` to `DATABASE_URL`.
 
-**`Can't reach database server`** during `prisma migrate deploy` — check that `DIRECT_URL` uses port **5432**, not 6543.
+**`Can't reach database server`** during schema push — check that `DIRECT_URL` uses port **5432**.
 
-**`Max client connections reached`** — remove `connection_limit=1` only if you're certain you need more; otherwise close extra Prisma clients or disable Vercel Fluid Compute (there's a known interaction issue).
+**`Max client connections reached`** — ensure `connection_limit=1` is set on `DATABASE_URL`.
