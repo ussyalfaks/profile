@@ -1,17 +1,24 @@
 {
   "name": "profile-intelligence-service",
+  "version": "2.0.0",
   "prisma": {
     "seed": "node prisma/seed.js"
   },
-  "version": "1.0.0",
-  "description": "Profile Intelligence Service - aggregates name data from Genderize, Agify, and Nationalize APIs",
+  "description": "Insighta Labs+ — Profile Intelligence Backend",
   "main": "api/index.js",
   "scripts": {
     "dev": "vercel dev",
     "build": "prisma generate",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
-    "db:migrate": "prisma migrate deploy"
+    "db:migrate": "prisma migrate deploy",
+    "test": "jest --runInBand --forceExit",
+    "test:watch": "jest --watch"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/__tests__/**/*.test.js"],
+    "testTimeout": 10000
   },
   "engines": {
     "node": ">=18.0.0"
@@ -20,9 +27,13 @@
     "@prisma/client": "^5.22.0",
     "cors": "^2.8.5",
     "express": "^4.21.1",
+    "express-rate-limit": "^7.5.0",
+    "jsonwebtoken": "^9.0.2",
     "uuidv7": "^1.0.2"
   },
   "devDependencies": {
-    "prisma": "^5.22.0"
+    "jest": "^29.7.0",
+    "prisma": "^5.22.0",
+    "supertest": "^7.0.0"
   }
 }
